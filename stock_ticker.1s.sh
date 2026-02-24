@@ -74,7 +74,7 @@ if "--set-symbol" in sys.argv:
 
 if "--prompt-symbol" in sys.argv:
     # Show a native macOS input dialog for custom ticker symbol
-    import subprocess as _sp
+    import subprocess as _sp, re as _re
     current = _prefs_early.get("symbol", default_symbol)
     script = (
         f'set t to text returned of (display dialog "Enter a US stock ticker symbol:" '
@@ -86,11 +86,53 @@ if "--prompt-symbol" in sys.argv:
         r = _sp.run(["osascript", "-e", script], capture_output=True, text=True, timeout=60)
         new_sym = (r.stdout or "").strip().upper()
         if r.returncode == 0 and new_sym:
+            # Validate: 1-5 uppercase letters only
+            if not _re.match(r'^[A-Z]{1,5}$', new_sym):
+                _sp.run(["osascript", "-e",
+                    f'display dialog "\\"{new_sym}\\" doesn\'t look like a valid ticker.\\n'
+                    f'Use 1-5 letters (e.g. AAPL, TSLA)." with title "Stock Ticker" '
+                    f'buttons {{"OK"}} default button "OK" with icon caution'],
+                    timeout=30)
+                sys.exit(0)
+            # Quick validation: try fetching a quote to confirm it exists
+            _sp.run(["osascript", "-e",
+                f'display dialog "Checking {new_sym}…" with title "Stock Ticker" '
+                f'giving up after 1 buttons {{"Wait"}} default button "Wait"'],
+                timeout=3, capture_output=True)
+            test_url = f"https://query1.finance.yahoo.com/v8/finance/chart/{new_sym}"
+            cmd = ["curl", "-sS", "-L", "--connect-timeout", "3", "--max-time", "5",
+                   "-A", "Mozilla/5.0", "-o", "-", "-w", "%{stderr}%{http_code}", test_url]
+            tr = _sp.run(cmd, capture_output=True, text=True, timeout=8)
+            try:
+                code = int((tr.stderr or "").strip())
+            except ValueError:
+                code = 0
+            valid = False
+            if code == 200 and tr.stdout:
+                try:
+                    data = json.loads(tr.stdout)
+                    meta = data.get("chart", {}).get("result", [{}])[0].get("meta", {})
+                    if meta.get("regularMarketPrice") is not None:
+                        valid = True
+                except Exception:
+                    pass
+            if not valid:
+                _sp.run(["osascript", "-e",
+                    f'display dialog "Could not find a quote for \\"{new_sym}\\".\\n'
+                    f'Make sure it\'s a valid US-listed ticker." with title "Stock Ticker" '
+                    f'buttons {{"OK"}} default button "OK" with icon caution'],
+                    timeout=30)
+                sys.exit(0)
+            # Save symbol + add to favorites
             p = {}
             try:
                 with open(prefs_path) as f: p = json.load(f)
             except Exception: pass
             p["symbol"] = new_sym
+            favs = p.get("favorites", [])
+            if new_sym not in [f.upper() for f in favs]:
+                favs.insert(0, new_sym)
+                p["favorites"] = favs
             with open(prefs_path, "w") as f: json.dump(p, f)
     except Exception:
         pass
@@ -549,6 +591,32 @@ last_price = st.get("last_price")
 last_dir = st.get("last_dir", "flat")
 last_change_time = st.get("last_change_time", "—")
 
+def print_settings_menu():
+    """Print the settings submenu (reused in error and normal states)."""
+    sp = f'"{script_path}"'
+    print("---")
+    pill_mark = "✓ " if display_mode == DISPLAY_PILL else "  "
+    text_mark = "✓ " if display_mode == DISPLAY_TEXT else "  "
+    print("Settings")
+    print(f"--Display Mode")
+    print(f"----{pill_mark}Pill Badge | shell={sp} param1=--set-display param2=pill terminal=false refresh=true")
+    print(f"----{text_mark}Plain Text | shell={sp} param1=--set-display param2=text terminal=false refresh=true")
+    print(f"--Change Symbol (current: {symbol})")
+    favorites = prefs.get("favorites", [])
+    quick_list = ["AAPL", "GOOG", "MSFT", "TSLA", "AMZN", "NVDA", "META", "WIX"]
+    # Merge favorites into the list (deduplicated, favorites first)
+    seen = set()
+    merged = []
+    for s in favorites + quick_list:
+        su = s.upper()
+        if su not in seen:
+            seen.add(su)
+            merged.append(su)
+    for s in merged:
+        mark = "✓ " if s == symbol else "  "
+        print(f"----{mark}{s} | shell={sp} param1=--set-symbol param2={s} terminal=false refresh=true")
+    print(f"----Custom Symbol… | shell={sp} param1=--prompt-symbol terminal=false refresh=true")
+
 if qd is None or qd.get("price") is None:
     color = "#9AA0A6"
     top = f"{symbol} ${fmt_num(last_price)} — {arrow_for_dir(last_dir)} {last_change_time} | color={color}"
@@ -558,6 +626,7 @@ if qd is None or qd.get("price") is None:
     print("Tried: Yahoo cookie+crumb, v8/chart, Stooq")
     print("---")
     print("Refresh now | refresh=true")
+    print_settings_menu()
     sys.exit(0)
 
 price = qd["price"]
@@ -647,20 +716,7 @@ print(f"Open Yahoo Finance | href=https://finance.yahoo.com/quote/{symbol}")
 print(f"Open Stooq | href=https://stooq.com/q/?s={stooq_sym}")
 print("Refresh now | refresh=true")
 
-# ---- Settings submenu ----
-sp = f'"{script_path}"'  # quote for paths with spaces
-print("---")
-pill_mark = "✓ " if display_mode == DISPLAY_PILL else "  "
-text_mark = "✓ " if display_mode == DISPLAY_TEXT else "  "
-print("Settings")
-print(f"--Display Mode")
-print(f"----{pill_mark}Pill Badge | shell={sp} param1=--set-display param2=pill terminal=false refresh=true")
-print(f"----{text_mark}Plain Text | shell={sp} param1=--set-display param2=text terminal=false refresh=true")
-print(f"--Change Symbol (current: {symbol})")
-for s in ["AAPL", "GOOG", "MSFT", "TSLA", "AMZN", "NVDA", "META", "WIX"]:
-    mark = "✓ " if s == symbol else "  "
-    print(f"----{mark}{s} | shell={sp} param1=--set-symbol param2={s} terminal=false refresh=true")
-print(f"----Custom Symbol… | shell={sp} param1=--prompt-symbol terminal=false refresh=true")
+print_settings_menu()
 
 # ---- Simulation mode: fake price ticks to preview flash animation ----
 if simulate_mode:
