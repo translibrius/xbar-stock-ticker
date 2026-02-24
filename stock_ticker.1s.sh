@@ -72,6 +72,30 @@ if "--set-symbol" in sys.argv:
         except Exception: pass
     sys.exit(0)
 
+if "--prompt-symbol" in sys.argv:
+    # Show a native macOS input dialog for custom ticker symbol
+    import subprocess as _sp
+    current = _prefs_early.get("symbol", default_symbol)
+    script = (
+        f'set t to text returned of (display dialog "Enter a US stock ticker symbol:" '
+        f'default answer "{current}" with title "Stock Ticker" '
+        f'buttons {{"Cancel", "OK"}} default button "OK")\n'
+        f'return t'
+    )
+    try:
+        r = _sp.run(["osascript", "-e", script], capture_output=True, text=True, timeout=60)
+        new_sym = (r.stdout or "").strip().upper()
+        if r.returncode == 0 and new_sym:
+            p = {}
+            try:
+                with open(prefs_path) as f: p = json.load(f)
+            except Exception: pass
+            p["symbol"] = new_sym
+            with open(prefs_path, "w") as f: json.dump(p, f)
+    except Exception:
+        pass
+    sys.exit(0)
+
 # ---- utility functions ----
 
 def now_str():
@@ -636,6 +660,7 @@ print(f"--Change Symbol (current: {symbol})")
 for s in ["AAPL", "GOOG", "MSFT", "TSLA", "AMZN", "NVDA", "META", "WIX"]:
     mark = "✓ " if s == symbol else "  "
     print(f"----{mark}{s} | shell={sp} param1=--set-symbol param2={s} terminal=false refresh=true")
+print(f"----Custom Symbol… | shell={sp} param1=--prompt-symbol terminal=false refresh=true")
 
 # ---- Simulation mode: fake price ticks to preview flash animation ----
 if simulate_mode:

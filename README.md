@@ -70,7 +70,7 @@ ln -s "$(pwd)/stock_ticker.1s.sh" "$HOME/Library/Application Support/xbar/plugin
 
 ## Configuration
 
-**From the dropdown menu** (recommended): Click the ticker in your menu bar, then go to **Settings > Change Symbol** and pick from the list.
+**From the dropdown menu** (recommended): Click the ticker in your menu bar, then go to **Settings > Change Symbol** and pick from the list — or choose **Custom Symbol…** to type any US ticker.
 
 **From the command line:**
 
@@ -117,6 +117,7 @@ xbar (1s interval)
 | `stock_ticker.1s.sh` | The plugin |
 | `.pill_render.swift` | Source for the pill badge renderer |
 | `install.sh` | One-command installer (symlink + compile) |
+| `uninstall.sh` | Clean removal of plugin and all generated files |
 | `.pill_render` | Compiled Swift binary (lives in plugins dir, gitignored) |
 | `.ticker_prefs.json` | User preferences — display mode, symbol (auto-generated) |
 | `.*_state.json` | Tracks last price + tick direction (auto-generated) |
@@ -132,6 +133,15 @@ xbar (1s interval)
 | No pill badge | Build `.pill_render` with `swiftc` (see Quick Start) |
 | Stale price | Click "Refresh now" — if persistent, delete `.*_cache.json` files |
 | Wrong symbol | Use Settings > Change Symbol in the dropdown |
+
+## Uninstall
+
+```bash
+cd xbar-stock-ticker
+./uninstall.sh
+```
+
+Removes the symlink, compiled binary, and all generated state/cache files. Then delete this folder if you like.
 
 ## License
 
