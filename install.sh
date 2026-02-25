@@ -14,16 +14,20 @@ if [ ! -d "$PLUGIN_DIR" ]; then
     exit 1
 fi
 
+# Remove old 1s symlink if upgrading
+OLD_LINK="$PLUGIN_DIR/stock_ticker.1s.sh"
+[ -L "$OLD_LINK" ] && rm "$OLD_LINK" && echo "  Removed old stock_ticker.1s.sh symlink"
+
 # Symlink the plugin script
-LINK="$PLUGIN_DIR/stock_ticker.1s.sh"
+LINK="$PLUGIN_DIR/stock_ticker.500ms.sh"
 if [ -L "$LINK" ]; then
     rm "$LINK"
 elif [ -f "$LINK" ]; then
-    echo "Warning: replacing existing stock_ticker.1s.sh (was a regular file)"
+    echo "Warning: replacing existing stock_ticker.500ms.sh (was a regular file)"
     rm "$LINK"
 fi
-ln -s "$REPO_DIR/stock_ticker.1s.sh" "$LINK"
-echo "  Linked stock_ticker.1s.sh → plugins/"
+ln -s "$REPO_DIR/stock_ticker.500ms.sh" "$LINK"
+echo "  Linked stock_ticker.500ms.sh → plugins/"
 
 # Build the pill renderer (optional — text mode works without it)
 SWIFT_SRC="$REPO_DIR/.pill_render.swift"

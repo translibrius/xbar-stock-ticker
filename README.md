@@ -27,8 +27,8 @@ Every stock ticker app wants your email, an API key, a $9/mo subscription, or al
 ## Features
 
 - **Pill-shaped badge** — colored, rounded menu bar item rendered with macOS system font
-- **Flash animation** — white flash on price changes fades to green/red over 3 seconds
-- **Sub-second display refresh** — runs every 1s, smart cache prevents API abuse
+- **Smooth flash animation** — intensity-scaled color fade on price ticks (bigger moves = brighter flash)
+- **Sub-second display refresh** — runs every 500ms, smart cache prevents API abuse
 - **Zero configuration** — no API keys, no tokens, no accounts to create
 - **Triple-redundant data** — automatic failover across 3 independent providers
 - **Market-aware** — detects market hours, shows countdown to next open when closed
@@ -39,7 +39,7 @@ Every stock ticker app wants your email, an API key, a $9/mo subscription, or al
 
 ### Pill Badge (default)
 
-A colored pill-shaped badge rendered with the macOS system font. Green for up, red for down, gray when closed. Flashes white on price changes to catch your attention.
+A colored pill-shaped badge rendered with the macOS system font. Green for up, red for down, gray when closed. Smoothly highlights on price changes — intensity scales with the size of the move.
 
 ### Plain Text
 
@@ -65,7 +65,7 @@ The installer symlinks the plugin into your xbar plugins directory and compiles 
 **Manual install** (text-only mode — no build step):
 
 ```bash
-ln -s "$(pwd)/stock_ticker.1s.sh" "$HOME/Library/Application Support/xbar/plugins/"
+ln -s "$(pwd)/stock_ticker.500ms.sh" "$HOME/Library/Application Support/xbar/plugins/"
 ```
 
 ## Configuration
@@ -90,7 +90,7 @@ Works with any US-listed stock — `AAPL`, `GOOG`, `MSFT`, `TSLA`, `AMZN`, `NVDA
 ## Architecture
 
 ```
-xbar (1s interval)
+xbar (500ms interval)
   |
   |-- Cache hit (<10s old)?
   |     \-- Yes -> render instantly (no network)
@@ -104,17 +104,17 @@ xbar (1s interval)
         \-- Cache result -> render
 ```
 
-**Cache layer**: The script is called every 1 second by xbar for a responsive display, but only hits the network every 10 seconds. In between, it serves from a local JSON cache.
+**Cache layer**: The script is called every 500ms by xbar for smooth animations, but only hits the network every 10 seconds. In between, it serves from a local JSON cache.
 
 **Pill renderer**: A compiled Swift helper (`.pill_render`) renders text onto a pill-shaped PNG using the macOS system font. The binary is ~70KB and runs in ~50ms. If not present, the plugin falls back to plain text mode.
 
-**Flash animation**: When the price ticks, the pill cycles through white -> bright color -> normal color over 3 seconds. The white flash catches peripheral vision while you're working.
+**Flash animation**: When the price ticks, the pill smoothly fades from a bright highlight back to its steady color over 4 seconds using eased interpolation. The flash intensity scales with the size of the price move — tiny ticks are barely visible, while large swings get a full highlight.
 
 ## Files
 
 | File | Purpose |
 |------|---------|
-| `stock_ticker.1s.sh` | The plugin |
+| `stock_ticker.500ms.sh` | The plugin |
 | `.pill_render.swift` | Source for the pill badge renderer |
 | `install.sh` | One-command installer (symlink + compile) |
 | `uninstall.sh` | Clean removal of plugin and all generated files |

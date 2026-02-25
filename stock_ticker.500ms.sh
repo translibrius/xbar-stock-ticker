@@ -196,21 +196,39 @@ def color_for_pct(pct):
         return "#FF3B30"
     return "#9AA0A6"
 
-# Flash sequence on price change — fades from bright highlight to normal over 3s
-FLASH_UP   = ["#FFFFFF", "#7AFF9B", "#34C759"]   # white → bright green → green
-FLASH_DOWN = ["#FFFFFF", "#FF7B73", "#FF3B30"]   # white → bright red   → red
-FLASH_DURATION = 3  # seconds
+# Smooth flash: continuous fade from highlight to steady color
+FLASH_DURATION = 4  # seconds
+FLASH_HIGHLIGHT_UP   = "#7AFF9B"  # max bright green
+FLASH_HIGHLIGHT_DOWN = "#FF7B73"  # max bright red
+FLASH_FULL_PCT = 0.3  # tick change % that produces full-intensity flash
 
-def flash_color(pct, direction, secs_since_change):
-    """Return a flash color if within FLASH_DURATION of a price change, else normal."""
-    if secs_since_change is None or secs_since_change >= FLASH_DURATION:
-        return color_for_pct(pct)
-    idx = int(secs_since_change)  # 0, 1, 2
+def _ease_out(t):
+    """Ease-out cubic: fast initial fade, slow tail."""
+    return 1.0 - (1.0 - t) ** 3
+
+def _lerp_color(c1, c2, t):
+    """Interpolate hex colors. t=0→c1, t=1→c2."""
+    r1, g1, b1 = int(c1[1:3], 16), int(c1[3:5], 16), int(c1[5:7], 16)
+    r2, g2, b2 = int(c2[1:3], 16), int(c2[3:5], 16), int(c2[5:7], 16)
+    t = max(0.0, min(1.0, t))
+    r = int(r1 + (r2 - r1) * t)
+    g = int(g1 + (g2 - g1) * t)
+    b = int(b1 + (b2 - b1) * t)
+    return f"#{r:02X}{g:02X}{b:02X}"
+
+def flash_color(pct, direction, secs_since_change, intensity=1.0):
+    """Smoothly fade from highlight to steady color, scaled by intensity."""
+    normal = color_for_pct(pct)
+    if secs_since_change is None or secs_since_change >= FLASH_DURATION or intensity <= 0:
+        return normal
+    t = _ease_out(secs_since_change / FLASH_DURATION)
     if direction == "up":
-        return FLASH_UP[min(idx, len(FLASH_UP) - 1)]
+        highlight = _lerp_color(normal, FLASH_HIGHLIGHT_UP, intensity)
     elif direction == "down":
-        return FLASH_DOWN[min(idx, len(FLASH_DOWN) - 1)]
-    return color_for_pct(pct)
+        highlight = _lerp_color(normal, FLASH_HIGHLIGHT_DOWN, intensity)
+    else:
+        return normal
+    return _lerp_color(highlight, normal, t)
 
 def arrow_for_dir(d):
     return {"up": "▲", "down": "▼", "flat": "▶"}.get(d, "▶")
@@ -237,36 +255,27 @@ def render_pill_b64(text, bg_hex, fg_hex="#FFFFFF"):
         pass
     return None
 
-# Flash pill colors: (bg, fg) pairs per frame
-PILL_FLASH_UP = [
-    ("#FFFFFF", "#000000"),  # frame 0: white pill, black text
-    ("#7AFF9B", "#FFFFFF"),  # frame 1: bright green
-    ("#34C759", "#FFFFFF"),  # frame 2: normal green
-]
-PILL_FLASH_DOWN = [
-    ("#FFFFFF", "#000000"),
-    ("#FF7B73", "#FFFFFF"),
-    ("#FF3B30", "#FFFFFF"),
-]
+# Pill steady-state colors
 PILL_NORMAL_UP   = ("#34C759", "#FFFFFF")
 PILL_NORMAL_DOWN = ("#FF3B30", "#FFFFFF")
 PILL_NEUTRAL     = ("#555555", "#CCCCCC")
 
-def pill_colors(pct, direction, secs_since):
-    """Return (bg_hex, fg_hex) for the pill, with flash animation."""
-    seq = None
-    if secs_since is not None and secs_since < FLASH_DURATION:
-        idx = min(int(secs_since), 2)
-        if direction == "up":
-            return PILL_FLASH_UP[idx]
-        elif direction == "down":
-            return PILL_FLASH_DOWN[idx]
-    # Steady state
+def pill_colors(pct, direction, secs_since, intensity=1.0):
+    """Return (bg_hex, fg_hex) for the pill, with smooth flash scaled by intensity."""
+    # Determine steady-state colors
     if pct is not None and pct > 0:
-        return PILL_NORMAL_UP
-    if pct is not None and pct < 0:
-        return PILL_NORMAL_DOWN
-    return PILL_NEUTRAL
+        steady_bg, steady_fg = PILL_NORMAL_UP
+    elif pct is not None and pct < 0:
+        steady_bg, steady_fg = PILL_NORMAL_DOWN
+    else:
+        return PILL_NEUTRAL
+    if secs_since is None or secs_since >= FLASH_DURATION or intensity <= 0:
+        return (steady_bg, steady_fg)
+    t = _ease_out(secs_since / FLASH_DURATION)
+    full_highlight = FLASH_HIGHLIGHT_UP if direction == "up" else FLASH_HIGHLIGHT_DOWN
+    highlight = _lerp_color(steady_bg, full_highlight, intensity)
+    bg = _lerp_color(highlight, steady_bg, t)
+    return (bg, steady_fg)
 
 def safe_float(v):
     try:
@@ -398,7 +407,7 @@ def fmt_countdown(delta):
 # ---- Load user preferences ----
 prefs = load_json(prefs_path)
 display_mode = prefs.get("display", DISPLAY_PILL)
-script_path = os.path.join(plugin_dir, "stock_ticker.1s.sh")
+script_path = os.path.join(plugin_dir, "stock_ticker.500ms.sh")
 
 def render_menubar(text, bg_hex, fg_hex, pct=None):
     """Render menu bar item in the user's chosen display mode."""
@@ -662,28 +671,33 @@ if isinstance(price, (int, float)) and isinstance(last_price, (int, float)):
         this_dir = st.get("last_dir", "flat")
 
 last_change_epoch = st.get("last_change_epoch")
+last_tick_pct = st.get("last_tick_pct", 0)
 
 if isinstance(price, (int, float)):
     if last_price is None or (isinstance(last_price, (int, float)) and price != last_price):
         last_change_time = now_str()
         last_change_epoch = time.time()
         last_dir = this_dir
+        if isinstance(last_price, (int, float)) and last_price != 0:
+            last_tick_pct = abs((price - last_price) / last_price) * 100.0
         st["last_change_time"] = last_change_time
         st["last_change_epoch"] = last_change_epoch
         st["last_dir"] = last_dir
+        st["last_tick_pct"] = last_tick_pct
     st["last_price"] = price
     save_json(state_path, st)
 
 # ---- Render ----
 secs_since = (time.time() - last_change_epoch) if last_change_epoch else None
-color = flash_color(pct, last_dir, secs_since)
+flash_intensity = min(1.0, last_tick_pct / FLASH_FULL_PCT) if last_tick_pct > 0 else 0
+color = flash_color(pct, last_dir, secs_since, flash_intensity)
 arrow = arrow_for_dir(last_dir)
 
 pct_str = "—" if pct is None else f"{pct:+.2f}%"
 price_str = "—" if price is None else f"{price:.2f}"
 
 # Menu bar line
-pill_bg, pill_fg = pill_colors(pct, last_dir, secs_since)
+pill_bg, pill_fg = pill_colors(pct, last_dir, secs_since, flash_intensity)
 pill_text = f"{symbol} ${price_str} {pct_str}"
 print(render_menubar(pill_text, pill_bg, pill_fg, pct))
 
